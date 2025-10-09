@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  commission-reconciliation:
+    build: .
+    container_name: commission-reconciliation
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ./docs:/app/docs
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./config:/app/config
+    restart: unless-stopped
+    command: python monitor_commissions.py
+
+  # Optional: One-time processing service
+  commission-processor:
+    build: .
+    container_name: commission-processor
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ./docs:/app/docs
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./config:/app/config
+    profiles:
+      - manual
+    command: python main.py
