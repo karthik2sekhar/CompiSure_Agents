@@ -80,11 +80,12 @@ class ReportGenerator:
                 # Summary sheet
                 summary_data = []
                 for carrier, data in results.items():
-                    if carrier == 'cross_carrier_analysis':
+                    if carrier == 'cross_carrier_analysis' or carrier == 'period_analysis':
                         continue
                     
                     summary_data.append({
                         'Carrier': carrier.replace('_', ' ').title(),
+                        'Statement Date': data.get('statement_date', 'Not Available'),
                         'Total Commissions': data.get('total_commissions', 0),
                         'Expected Commissions': data.get('expected_commissions', 0),
                         'Variance Amount': data.get('variance_amount', 0),
@@ -99,7 +100,7 @@ class ReportGenerator:
                 
                 # Individual carrier sheets
                 for carrier, data in results.items():
-                    if carrier == 'cross_carrier_analysis':
+                    if carrier == 'cross_carrier_analysis' or carrier == 'period_analysis':
                         continue
                     
                     sheet_name = carrier.replace('_', ' ').title()[:31]  # Excel sheet name limit
@@ -109,6 +110,7 @@ class ReportGenerator:
                     
                     # Add summary info
                     carrier_data.append(['Metric', 'Value'])
+                    carrier_data.append(['Statement Date', data.get('statement_date', 'Not Available')])
                     carrier_data.append(['Total Commissions', f"${data.get('total_commissions', 0):,.2f}"])
                     carrier_data.append(['Expected Commissions', f"${data.get('expected_commissions', 0):,.2f}"])
                     carrier_data.append(['Variance Amount', f"${data.get('variance_amount', 0):,.2f}"])
@@ -440,13 +442,35 @@ class ReportGenerator:
             styles = getSampleStyleSheet()
             story = []
             
-            # Title
+            # Custom styles for better formatting
             title_style = ParagraphStyle(
                 'CustomTitle',
                 parent=styles['Heading1'],
                 fontSize=24,
                 spaceAfter=30,
                 textColor=colors.darkblue
+            )
+            
+            # Carrier analysis heading style
+            carrier_heading_style = ParagraphStyle(
+                'CarrierHeading',
+                parent=styles['Heading3'],
+                fontSize=16,
+                spaceAfter=15,
+                spaceBefore=20,
+                textColor=colors.darkblue,
+                alignment=0  # Left alignment
+            )
+            
+            # Subsection heading style
+            subsection_heading_style = ParagraphStyle(
+                'SubsectionHeading',
+                parent=styles['Heading4'],
+                fontSize=12,
+                spaceAfter=8,
+                spaceBefore=12,
+                textColor=colors.darkred,
+                alignment=0  # Left alignment
             )
             
             story.append(Paragraph("Commission Reconciliation Report", title_style))
@@ -471,15 +495,16 @@ class ReportGenerator:
             # Carrier breakdown table
             story.append(Paragraph("Carrier Summary", styles['Heading2']))
             
-            table_data = [['Carrier', 'Total Commissions', 'Variance Amount', 'Discrepancies']]
+            table_data = [['Carrier', 'Statement Date', 'Total Commissions', 'Variance Amount', 'Discrepancies']]
             
             for carrier, data in results.items():
-                if carrier == 'cross_carrier_analysis':
+                if carrier == 'cross_carrier_analysis' or carrier == 'period_analysis':
                     continue
                 
                 discrepancies_count = len(data.get('overpayments', [])) + len(data.get('underpayments', []))
                 table_data.append([
                     carrier.replace('_', ' ').title(),
+                    data.get('statement_date', 'N/A'),
                     f"${data.get('total_commissions', 0):,.2f}",
                     f"${data.get('variance_amount', 0):,.2f}",
                     str(discrepancies_count)
@@ -506,14 +531,22 @@ class ReportGenerator:
             
             # Process each carrier for detailed analysis
             for carrier, data in results.items():
-                if carrier == 'cross_carrier_analysis':
+                if carrier in ['cross_carrier_analysis', 'period_analysis']:
                     continue
                 
-                story.append(Paragraph(f"{carrier.replace('_', ' ').title()} Analysis", styles['Heading3']))
+                # Skip carriers with no discrepancies to avoid empty sections
+                has_overpayments = data.get('overpayments') and len(data['overpayments']) > 0
+                has_underpayments = data.get('underpayments') and len(data['underpayments']) > 0
+                has_variances = data.get('subscriber_variances') and len(data['subscriber_variances']) > 0
+                
+                if not (has_overpayments or has_underpayments or has_variances):
+                    continue
+                
+                story.append(Paragraph(f"{carrier.replace('_', ' ').title()} Analysis", carrier_heading_style))
                 
                 # Overpayments Table
                 if data.get('overpayments') and len(data['overpayments']) > 0:
-                    story.append(Paragraph("Overpayments", styles['Heading4']))
+                    story.append(Paragraph("Overpayments", subsection_heading_style))
                     
                     overpay_data = [['Policy ID', 'Subscriber', 'Overpayment Amount', 'Percentage', 'Reason']]
                     
@@ -555,7 +588,7 @@ class ReportGenerator:
                 
                 # Underpayments Table
                 if data.get('underpayments') and len(data['underpayments']) > 0:
-                    story.append(Paragraph("Underpayments", styles['Heading4']))
+                    story.append(Paragraph("Underpayments", subsection_heading_style))
                     
                     underpay_data = [['Policy ID', 'Subscriber', 'Underpayment Amount', 'Percentage', 'Reason']]
                     for underpay in data['underpayments']:
@@ -586,7 +619,7 @@ class ReportGenerator:
                 
                 # Subscriber Variance Summary (if not already shown in overpayments/underpayments)
                 if not data.get('overpayments') and not data.get('underpayments') and data.get('subscriber_variances') and len(data['subscriber_variances']) > 0:
-                    story.append(Paragraph("Subscriber Variance Analysis", styles['Heading4']))
+                    story.append(Paragraph("Subscriber Variance Analysis", subsection_heading_style))
                     
                     variance_data = [['Policy ID', 'Subscriber', 'Expected', 'Actual', 'Variance', 'Variance %']]
                     for variance in data['subscriber_variances']:
@@ -616,7 +649,7 @@ class ReportGenerator:
                 
                 # Legacy discrepancies section (if any exist)
                 if data.get('discrepancies'):
-                    story.append(Paragraph("Other Discrepancies:", styles['Heading4']))
+                    story.append(Paragraph("Other Discrepancies:", subsection_heading_style))
                     for disc in data.get('discrepancies', []):
                         disc_type = disc.get('type', '').title()
                         actual_amount = disc.get('actual_amount', 0)

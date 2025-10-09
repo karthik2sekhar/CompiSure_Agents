@@ -149,9 +149,252 @@ class CommissionProcessor:
         """Process PDF commission statement"""
         parser = self.carrier_parsers.get(carrier)
         if not parser:
-            return self._generic_pdf_parse(file_path, carrier)
+            result = self._generic_pdf_parse(file_path, carrier)
+        else:
+            result = parser(file_path)
         
-        return parser(file_path)
+        # Add statement date extraction
+        if result:
+            result['source_file'] = os.path.basename(file_path)
+            statement_date = self._extract_statement_date_from_file(file_path, result)
+            if statement_date:
+                result['statement_date'] = statement_date
+        
+        return result
+    
+    def _extract_statement_date_from_file(self, file_path: str, commission_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract statement date from carrier-specific columns in PDF content or filename
+        
+        Args:
+            file_path: Path to the commission statement file
+            commission_data: Extracted commission data
+            
+        Returns:
+            Statement date in YYYY-MM-DD format, or None if not found
+        """
+        filename = os.path.basename(file_path)
+        carrier = commission_data.get('carrier', '').lower()
+        raw_text = commission_data.get('raw_text', '')
+        
+        # Carrier-specific column patterns for statement dates
+        carrier_date_patterns = {
+            'hc': [
+                # HC-specific: Find the most common MM/YYYY pattern (avoiding header dates)
+                # This will be handled by a special HC method
+            ],
+            'hne': [
+                r'Effective\s+Date[:\s]*(\d{1,2}\/\d{1,2}\/20\d{2})',  # Effective Date column
+                r'Effective[:\s]*(\d{1,2}\/\d{1,2}\/20\d{2})',  # Effective Date variations
+                r'(\d{1,2}\/\d{1,2}\/20\d{2})',  # Date pattern in format M/D/YYYY
+            ],
+            'humana': [
+                r'Month\s+paid[/\s]*Paid\s+to\s+date[:\s]*(\w+\s+\d{2})',  # Month paid/Paid to date like "MAY 25"
+                r'Month\s+paid[:\s]*(\w+\s+\d{2})',  # Month paid variations
+                r'Paid\s+to\s+date[:\s]*(\w+\s+\d{2})',  # Paid to date variations
+                r'(\w+\s+\d{2})',  # General month + year pattern like "MAY 25"
+            ]
+        }
+        
+        # Special handling for HC carrier
+        if carrier == 'hc' and raw_text:
+            parsed_date = self._extract_hc_statement_date(raw_text)
+            if parsed_date:
+                self.logger.info(f"Extracted HC statement date from content: {parsed_date}")
+                return parsed_date
+        
+        # Try carrier-specific patterns for other carriers
+        elif carrier in carrier_date_patterns and raw_text:
+            self.logger.debug(f"Extracting {carrier.upper()} statement date from specific columns")
+            for pattern in carrier_date_patterns[carrier]:
+                match = re.search(pattern, raw_text, re.IGNORECASE)
+                if match:
+                    date_str = match.group(1)
+                    self.logger.info(f"Found {carrier.upper()} date string: '{date_str}' using pattern: '{pattern}'")
+                    parsed_date = self._parse_carrier_date(date_str, carrier)
+                    if parsed_date:
+                        self.logger.info(f"Extracted {carrier.upper()} statement date from content: {parsed_date}")
+                        return parsed_date
+        
+        # Fallback to filename patterns (more specific to avoid false matches)
+        date_patterns = [
+            r'(20\d{2})(\d{2})',  # YYYYMM (only 20xx years)
+            r'(20\d{2})[_-](\d{2})',  # YYYY-MM or YYYY_MM (only 20xx years)
+            r'(\d{2})[_-](20\d{2})',  # MM-YYYY or MM_YYYY (only 20xx years)
+            r'(20\d{2})[_-](\d{2})[_-](\d{2})',  # YYYY-MM-DD (only 20xx years)
+        ]
+        
+        # Month name to number mapping
+        month_names = {
+            'jan': '01', 'january': '01',
+            'feb': '02', 'february': '02', 
+            'mar': '03', 'march': '03',
+            'apr': '04', 'april': '04',
+            'may': '05', 'jun': '06', 'june': '06',
+            'jul': '07', 'july': '07',
+            'aug': '08', 'august': '08',
+            'sep': '09', 'september': '09',
+            'oct': '10', 'october': '10',
+            'nov': '11', 'november': '11',
+            'dec': '12', 'december': '12'
+        }
+        
+        # Check for numeric date patterns
+        for pattern in date_patterns:  # All numeric patterns
+            match = re.search(pattern, filename, re.IGNORECASE)
+            if match:
+                try:
+                    if len(match.groups()) == 3:  # YYYY-MM-DD
+                        year, month, day = match.groups()
+                        # Validate month and day
+                        if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+                            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                    elif len(match.groups()) == 2:
+                        if len(match.group(1)) == 4:  # YYYY first
+                            year, month = match.groups()
+                        else:  # MM first
+                            month, year = match.groups()
+                        # Validate month
+                        if 1 <= int(month) <= 12:
+                            return f"{year}-{month.zfill(2)}-01"
+                except (ValueError, TypeError):
+                    continue
+        
+        # Check for month names in filename
+        filename_lower = filename.lower()
+        for month_name, month_num in month_names.items():
+            if month_name in filename_lower:
+                # Try to find a year near the month name
+                year_pattern = r'20\d{2}'
+                year_match = re.search(year_pattern, filename)
+                if year_match:
+                    year = year_match.group()
+                    return f"{year}-{month_num}-01"
+                else:
+                    # Default to current year
+                    current_year = datetime.now().year
+                    return f"{current_year}-{month_num}-01"
+        
+        # Try to extract from PDF content if available
+        raw_text = commission_data.get('raw_text', '')
+        if raw_text:
+            # Look for common date patterns in the text
+            text_date_patterns = [
+                r'statement\s+date[:\s]+(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})',
+                r'period[:\s]+(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})',
+                r'for\s+the\s+month\s+of\s+(\w+)\s+(\d{4})',
+            ]
+            
+            for pattern in text_date_patterns:
+                match = re.search(pattern, raw_text, re.IGNORECASE)
+                if match:
+                    try:
+                        if len(match.groups()) == 3 and match.group(3).isdigit():
+                            if match.group(3).isdigit() and len(match.group(3)) == 4:  # Year is third group
+                                month, day, year = match.groups()
+                                return f"{year}-{month.zfill(2)}-01"  # Use first of month
+                            elif match.group(1).isalpha():  # Month name
+                                month_name, year = match.groups()
+                                month_num = month_names.get(month_name.lower())
+                                if month_num:
+                                    return f"{year}-{month_num}-01"
+                    except:
+                        continue
+        
+        self.logger.debug(f"Could not extract statement date from {filename}")
+        return None
+
+    def _extract_hc_statement_date(self, raw_text: str) -> Optional[str]:
+        """
+        Extract HC statement date by finding the most common MM/YYYY pattern in the Month column.
+        HC statements have individual Month entries for each subscriber, so we find the most frequent one.
+        """
+        # Find all MM/YYYY patterns but exclude dates that are part of MM/DD/YYYY patterns
+        mm_yyyy_pattern = r'(?<!\d/)(\d{1,2}\/20\d{2})(?!/\d)'
+        all_dates = re.findall(mm_yyyy_pattern, raw_text)
+        
+        if all_dates:
+            # Count frequency of each date
+            from collections import Counter
+            date_counts = Counter(all_dates)
+            
+            # Get the most common date (this should be the Month column value)
+            most_common_date = date_counts.most_common(1)[0][0]
+            
+            self.logger.info(f"HC: Found {len(all_dates)} MM/YYYY dates, most common: '{most_common_date}' (appears {date_counts[most_common_date]} times)")
+            
+            # Parse the most common date
+            parsed_date = self._parse_carrier_date(most_common_date, 'hc')
+            return parsed_date
+        
+        return None
+    
+    def _parse_carrier_date(self, date_str: str, carrier: str) -> Optional[str]:
+        """
+        Parse carrier-specific date formats into YYYY-MM-DD format
+        
+        Args:
+            date_str: Raw date string extracted from PDF
+            carrier: Carrier name (hc, hne, humana)
+            
+        Returns:
+            Formatted date string in YYYY-MM-DD format, or None if parsing fails
+        """
+        date_str = date_str.strip()
+        
+        try:
+            if carrier == 'hc':
+                # HC uses "MM/YYYY" format like "07/2025" -> should be "2025-07-01"
+                if '/' in date_str:
+                    parts = date_str.split('/')
+                    if len(parts) == 2:
+                        month, year = parts
+                        if 1 <= int(month) <= 12 and len(year) == 4:
+                            result = f"{year}-{month.zfill(2)}-01"
+                            self.logger.info(f"HC date parsing: '{date_str}' -> '{result}'")
+                            return result
+                            
+            elif carrier == 'hne':
+                # HNE uses "M/D/YYYY" format like "2/1/2025"
+                if '/' in date_str:
+                    parts = date_str.split('/')
+                    if len(parts) == 3:
+                        month, day, year = parts
+                        if 1 <= int(month) <= 12 and 1 <= int(day) <= 31 and len(year) == 4:
+                            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                            
+            elif carrier == 'humana':
+                # Humana uses "MONTH YY" format like "MAY 25" -> should be "2025-05-01"
+                month_mapping = {
+                    'jan': '01', 'january': '01',
+                    'feb': '02', 'february': '02',
+                    'mar': '03', 'march': '03',
+                    'apr': '04', 'april': '04',
+                    'may': '05',
+                    'jun': '06', 'june': '06',
+                    'jul': '07', 'july': '07',
+                    'aug': '08', 'august': '08',
+                    'sep': '09', 'september': '09',
+                    'oct': '10', 'october': '10',
+                    'nov': '11', 'november': '11',
+                    'dec': '12', 'december': '12'
+                }
+                
+                parts = date_str.split()
+                if len(parts) == 2:
+                    month_name, year_short = parts
+                    month_num = month_mapping.get(month_name.lower())
+                    if month_num and year_short.isdigit():
+                        # Convert 2-digit year to 4-digit (assuming 20xx)
+                        full_year = f"20{year_short}" if len(year_short) == 2 else year_short
+                        result = f"{full_year}-{month_num}-01"
+                        self.logger.info(f"Humana date parsing: '{date_str}' -> '{result}'")
+                        return result
+                        
+        except (ValueError, IndexError, AttributeError) as e:
+            self.logger.debug(f"Error parsing {carrier} date '{date_str}': {str(e)}")
+            
+        return None
     
     def _generic_pdf_parse(self, file_path: str, carrier: str) -> Dict[str, Any]:
         """Generic PDF parsing for unknown carrier formats"""
@@ -258,6 +501,12 @@ class CommissionProcessor:
                 
                 data['raw_text'] = full_text
                 
+                # Extract statement date from HNE Effective Date column
+                statement_date = self._extract_statement_date_from_file(file_path, data)
+                if statement_date:
+                    data['statement_date'] = statement_date
+                    self.logger.info(f"HNE statement date extracted: {statement_date}")
+                
                 # Use LLM service with HNE-specific extraction logic
                 self.logger.info(f"Processing HNE commission statement with enhanced extraction")
                 data['commissions'] = self.llm_service.extract_commission_entries(full_text, 'hne')
@@ -303,6 +552,12 @@ class CommissionProcessor:
                 
                 data['raw_text'] = full_text
                 
+                # Extract statement date from Humana Month paid/Paid to date column
+                statement_date = self._extract_statement_date_from_file(file_path, data)
+                if statement_date:
+                    data['statement_date'] = statement_date
+                    self.logger.info(f"Humana statement date extracted: {statement_date}")
+                
                 # Use LLM service with Humana-specific extraction logic
                 self.logger.info(f"Processing Humana commission statement with enhanced extraction")
                 data['commissions'] = self.llm_service.extract_commission_entries(full_text, 'humana')
@@ -347,6 +602,12 @@ class CommissionProcessor:
                         full_text += page_text + "\n"
                 
                 data['raw_text'] = full_text
+                
+                # Extract statement date from HC Month column
+                statement_date = self._extract_statement_date_from_file(file_path, data)
+                if statement_date:
+                    data['statement_date'] = statement_date
+                    self.logger.info(f"HC statement date extracted: {statement_date}")
                 
                 # Use LLM service with HC-specific extraction logic
                 self.logger.info(f"Processing HC commission statement with enhanced extraction")

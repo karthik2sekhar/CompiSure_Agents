@@ -107,8 +107,14 @@ class EmailService:
     
     def _generate_subject(self, reconciliation_results: Dict[str, Any]) -> str:
         """Generate email subject line"""
-        total_carriers = len([k for k in reconciliation_results.keys() if k != 'cross_carrier_analysis'])
-        total_discrepancies = sum(len(v.get('discrepancies', [])) for v in reconciliation_results.values() if isinstance(v, dict))
+        # Exclude non-carrier entries from count
+        excluded_keys = {'cross_carrier_analysis', 'period_analysis'}
+        total_carriers = len([k for k in reconciliation_results.keys() if k not in excluded_keys])
+        
+        # Count all discrepancies from all carriers (including empty lists)
+        total_discrepancies = sum(len(v.get('discrepancies', [])) 
+                                 for k, v in reconciliation_results.items() 
+                                 if isinstance(v, dict) and k not in excluded_keys)
         
         date_str = datetime.now().strftime("%B %d, %Y")
         return f"Commission Reconciliation Report - {date_str} ({total_carriers} Carriers, {total_discrepancies} Discrepancies)"
@@ -116,18 +122,24 @@ class EmailService:
     def _generate_html_body(self, reconciliation_results: Dict[str, Any]) -> str:
         """Generate HTML email body"""
         
-        # Calculate summary statistics
-        total_carriers = len([k for k in reconciliation_results.keys() if k != 'cross_carrier_analysis'])
-        total_discrepancies = sum(len(v.get('discrepancies', [])) for v in reconciliation_results.values() if isinstance(v, dict) and 'discrepancies' in v)
+        # Calculate summary statistics - exclude non-carrier entries
+        excluded_keys = {'cross_carrier_analysis', 'period_analysis'}
+        total_carriers = len([k for k in reconciliation_results.keys() if k not in excluded_keys])
+        
+        # Count all discrepancies from all carriers (including empty lists)
+        total_discrepancies = sum(len(v.get('discrepancies', [])) 
+                                 for k, v in reconciliation_results.items() 
+                                 if isinstance(v, dict) and k not in excluded_keys)
         
         # Get cross-carrier total
         cross_analysis = reconciliation_results.get('cross_carrier_analysis', {})
         total_commissions = cross_analysis.get('total_all_carriers', 0)
         
-        # Build carrier summaries
+        # Build carrier summaries - exclude non-carrier entries
         carrier_summaries = []
+        excluded_keys = {'cross_carrier_analysis', 'period_analysis'}
         for carrier, results in reconciliation_results.items():
-            if carrier != 'cross_carrier_analysis' and isinstance(results, dict):
+            if carrier not in excluded_keys and isinstance(results, dict):
                 carrier_total = results.get('total_commissions', 0)
                 variance = results.get('variance_amount', 0)
                 discrepancy_count = len(results.get('discrepancies', []))
@@ -219,9 +231,14 @@ class EmailService:
             "EXECUTIVE SUMMARY:",
         ]
         
-        # Add summary statistics
-        total_carriers = len([k for k in reconciliation_results.keys() if k != 'cross_carrier_analysis'])
-        total_discrepancies = sum(len(v.get('discrepancies', [])) for v in reconciliation_results.values() if isinstance(v, dict) and 'discrepancies' in v)
+        # Add summary statistics - exclude non-carrier entries
+        excluded_keys = {'cross_carrier_analysis', 'period_analysis'}
+        total_carriers = len([k for k in reconciliation_results.keys() if k not in excluded_keys])
+        
+        # Count all discrepancies from all carriers (including empty lists)
+        total_discrepancies = sum(len(v.get('discrepancies', [])) 
+                                 for k, v in reconciliation_results.items() 
+                                 if isinstance(v, dict) and k not in excluded_keys)
         cross_analysis = reconciliation_results.get('cross_carrier_analysis', {})
         total_commissions = cross_analysis.get('total_all_carriers', 0)
         
@@ -233,9 +250,10 @@ class EmailService:
             "CARRIER BREAKDOWN:",
         ])
         
-        # Add carrier details
+        # Add carrier details - exclude non-carrier entries
+        excluded_keys = {'cross_carrier_analysis', 'period_analysis'}
         for carrier, results in reconciliation_results.items():
-            if carrier != 'cross_carrier_analysis' and isinstance(results, dict):
+            if carrier not in excluded_keys and isinstance(results, dict):
                 carrier_total = results.get('total_commissions', 0)
                 variance = results.get('variance_amount', 0)
                 discrepancy_count = len(results.get('discrepancies', []))

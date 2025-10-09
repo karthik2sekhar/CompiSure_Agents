@@ -28,7 +28,7 @@ def setup_logging():
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(f"logs/commission_reconciliation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
+            logging.FileHandler(f"logs/commission_reconciliation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log", encoding='utf-8'),
             logging.StreamHandler()
         ]
     )
@@ -57,6 +57,17 @@ def run_reconciliation_workflow():
         # Perform reconciliation analysis
         logger.info("Performing reconciliation analysis...")
         reconciliation_results = reconciler.reconcile_commissions(commission_data)
+        
+        # Generate period-specific analysis
+        logger.info("Generating period-specific analysis...")
+        period_analysis = reconciler.generate_period_specific_analysis(reconciliation_results)
+        
+        # Add period analysis to results for reporting
+        reconciliation_results['period_analysis'] = period_analysis
+        
+        # Log period-specific insights
+        for period, summary in period_analysis.get('period_comparison', {}).items():
+            logger.info(f"Period {period}: ${summary['total_actual']:.2f} actual vs ${summary['total_expected']:.2f} expected (Variance: ${summary['total_variance']:.2f})")
         
         # Generate reports
         logger.info("Generating reconciliation reports...")
