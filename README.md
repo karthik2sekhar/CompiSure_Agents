@@ -1,48 +1,46 @@
-# CompiSure AI Agents - Automated Commission Reconciliation System
+# CompiSure AI Commission Reconciliation System
 
-🤖 **AI-Powered Commission Statement Processing & Reconciliation**
+🤖 **Production-Ready AI-Powered Commission Statement Processing & Reconciliation**
 
-An intelligent automation system that monitors commission statements, extracts data using AI, performs reconciliation analysis, and delivers comprehensive reports via email.
+An intelligent automation system that processes commission statements from multiple carriers, extracts data using AI/LLM technology, performs reconciliation analysis, and delivers comprehensive reports.
 
-## 🚀 Features
+## 🚀 System Overview
 
-### Core Capabilities
-- **🔍 Real-time File Monitoring**: Automatically detects new commission statements in the `docs` folder
-- **🧠 AI-Powered Extraction**: Uses OpenAI GPT-3.5 for intelligent PDF data extraction
-- **📊 Automated Reconciliation**: Compares commission statements against enrollment data
-- **📧 Email Reporting**: Automatically sends detailed reports to stakeholders
-- **📈 Multi-format Reports**: Generates Excel, HTML, PDF, and JSON reports with visualizations
-
-### Supported Formats
-- **PDF Commission Statements** (Primary)
-- **Excel Files** (.xlsx, .xls)
-- **CSV Files**
+### Core Features
+- **🧠 Multi-Carrier Support**: HC, HNE, Humana with extensible pattern extraction
+- **🔍 Hybrid Extraction**: Pattern-based extraction with LLM fallback for reliability
+- **📊 Automated Reconciliation**: Policy mapping and variance analysis
+- **📧 Email Integration**: Automated report distribution 
+- **🔒 PHI Compliance**: Built-in data scrubbing for privacy protection
+- **📈 Multi-format Reports**: Excel, HTML, PDF with visualizations
 
 ### Supported Carriers
-- Aetna
-- Blue Cross Blue Shield
-- Cigna
-- UnitedHealth
-- *Easily extensible for additional carriers*
+- **Health Choice (HC)** - Pattern-based extraction
+- **Harvard Pilgrim Health Care Northeast (HNE)** - Individual amount mapping
+- **Humana** - Name-to-policy ID conversion
+- *Extensible architecture for additional carriers*
 
-## 🛠️ System Architecture
+## 🏗️ Architecture
 
 ```
 CompiSure_AI_Agents/
 ├── 📁 src/                           # Core application modules
-│   ├── commission_processor.py       # Commission data processing
-│   ├── llm_extraction_service.py     # AI-powered PDF extraction
-│   ├── reconciliation_engine.py      # Variance analysis & reconciliation
+│   ├── commission_processor.py       # Main processing orchestration
+│   ├── reconciliation_engine.py      # Policy mapping & variance analysis
+│   ├── llm_extraction_service.py     # AI-powered data extraction
 │   ├── report_generator.py           # Multi-format report generation
-│   ├── email_service.py              # Automated email distribution
-│   └── file_monitor.py               # Real-time file system monitoring
-├── 📁 docs/                          # Commission statements input folder
-├── 📁 reports/                       # Generated reports output
-├── 📁 logs/                          # System operation logs
-├── 🐍 main.py                        # Core reconciliation workflow
-├── 🤖 monitor_commissions.py         # File monitoring application
-├── ⚙️ setup_email.py                 # One-time configuration utility
-└── 📝 enrollment_info.csv            # Enrollment data for reconciliation
+│   ├── email_service.py              # Email distribution system
+│   ├── phi_scrubber.py               # Privacy compliance
+│   ├── pattern_extractors/           # Carrier-specific extractors
+│   │   └── hc_extractor.py           # Health Choice patterns
+│   └── utils.py                      # Shared utilities
+├── 📁 config/                        # Configuration files
+├── 📁 docs/                          # Commission statements & documentation
+├── 📁 logs/                          # System operation logs (auto-created)
+├── 📁 reports/                       # Generated reports (auto-created)
+├── 🐍 main.py                        # Primary application entry point
+├── 🤖 monitor_commissions.py         # File monitoring service
+└── 📝 requirements.txt               # Python dependencies
 ```
 
 ## 🏃‍♂️ Quick Start

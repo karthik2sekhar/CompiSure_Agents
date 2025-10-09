@@ -70,12 +70,19 @@ def run_reconciliation_workflow():
         logger.info("Attempting to send email report...")
         email_service = EmailService()
         
-        # Find the PDF report file
+        # Find the PDF report file (use the enhanced detailed PDF)
         pdf_report = None
         for file in report_files:
-            if file.endswith('.pdf') and 'summary' in file.lower():
+            if file.endswith('.pdf') and 'commission_reconciliation_summary' in file.lower():
                 pdf_report = file
                 break
+        
+        # Fallback to any PDF if the enhanced one is not found
+        if not pdf_report:
+            for file in report_files:
+                if file.endswith('.pdf'):
+                    pdf_report = file
+                    break
         
         if pdf_report:
             # Get email configuration from environment variables

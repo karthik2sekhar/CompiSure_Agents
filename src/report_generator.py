@@ -169,35 +169,44 @@ class ReportGenerator:
         <head>
             <title>Commission Reconciliation Report</title>
             <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .header { background-color: #2c5aa0; color: white; padding: 20px; text-align: center; }
-                .summary { background-color: #f8f9fa; padding: 15px; margin: 20px 0; border-radius: 5px; }
-                .carrier-section { margin: 30px 0; border: 1px solid #ddd; border-radius: 5px; }
-                .carrier-header { background-color: #e9ecef; padding: 15px; font-weight: bold; }
-                .carrier-content { padding: 15px; }
-                table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                th { background-color: #f2f2f2; }
-                .metric { display: inline-block; margin: 10px 20px 10px 0; }
-                .metric-label { font-weight: bold; }
-                .positive { color: green; }
-                .negative { color: red; }
-                .warning { color: orange; }
-                .discrepancy { background-color: #fff3cd; padding: 10px; margin: 5px 0; border-radius: 3px; }
+                body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+                .header { background-color: #2c5aa0; color: white; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 20px; }
+                .summary { background-color: #ffffff; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                .carrier-section { margin: 30px 0; border: 1px solid #ddd; border-radius: 8px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                .carrier-header { background-color: #e9ecef; padding: 15px; font-weight: bold; font-size: 18px; border-radius: 8px 8px 0 0; }
+                .carrier-content { padding: 20px; }
+                .variance-section { margin: 20px 0; }
+                .variance-header { font-size: 16px; font-weight: bold; margin: 15px 0 10px 0; color: #333; }
+                table { width: 100%; border-collapse: collapse; margin: 15px 0; background-color: white; }
+                th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+                th { background-color: #f8f9fa; font-weight: bold; color: #495057; }
+                .metric { display: inline-block; margin: 10px 30px 10px 0; padding: 8px 0; }
+                .metric-label { font-weight: bold; color: #495057; }
+                .positive { color: #28a745; font-weight: bold; }
+                .negative { color: #dc3545; font-weight: bold; }
+                .warning { color: #ffc107; font-weight: bold; }
+                .overpayment-row { background-color: #fff3cd; }
+                .underpayment-row { background-color: #f8d7da; }
+                .variance-summary { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 10px 0; }
+                .alert-success { background-color: #d4edda; border: 1px solid #c3e6cb; padding: 10px; border-radius: 4px; color: #155724; }
+                .alert-warning { background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 4px; color: #856404; }
+                .alert-danger { background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px; color: #721c24; }
+                .no-variances { text-align: center; color: #6c757d; font-style: italic; padding: 20px; }
+                .highlight-amount { font-size: 1.1em; font-weight: bold; }
             </style>
         </head>
         <body>
             <div class="header">
-                <h1>Commission Reconciliation Report</h1>
+                <h1>📊 Commission Reconciliation Report</h1>
                 <p>Generated on {{ report_date }}</p>
             </div>
             
             <div class="summary">
-                <h2>Executive Summary</h2>
+                <h2>📈 Executive Summary</h2>
                 {% if cross_carrier_analysis %}
                 <div class="metric">
                     <span class="metric-label">Total Commission (All Carriers):</span> 
-                    ${{ "%.2f"|format(cross_carrier_analysis.total_all_carriers) }}
+                    <span class="highlight-amount">${{ "%.2f"|format(cross_carrier_analysis.total_all_carriers or 0) }}</span>
                 </div>
                 {% endif %}
                 
@@ -208,78 +217,204 @@ class ReportGenerator:
                 <div class="metric">
                     <span class="metric-label">Total Discrepancies:</span> {{ total_discrepancies }}
                 </div>
+
+                <div class="metric">
+                    <span class="metric-label">Total Overpayments:</span> 
+                    <span class="positive">${{ "%.2f"|format(total_overpayments) }}</span>
+                </div>
+                
+                <div class="metric">
+                    <span class="metric-label">Total Underpayments:</span> 
+                    <span class="negative">${{ "%.2f"|format(total_underpayments) }}</span>
+                </div>
             </div>
             
             {% for carrier, data in carriers.items() %}
             <div class="carrier-section">
                 <div class="carrier-header">
-                    {{ carrier.replace('_', ' ').title() }} Commission Analysis
+                    🏢 {{ carrier.replace('_', ' ').title() }} Commission Analysis
                 </div>
                 <div class="carrier-content">
-                    <div class="metric">
-                        <span class="metric-label">Total Commissions:</span> 
-                        ${{ "%.2f"|format(data.total_commissions) }}
+                    <div class="variance-summary">
+                        <div class="metric">
+                            <span class="metric-label">Total Commissions:</span> 
+                            <span class="highlight-amount">${{ "%.2f"|format(data.total_commissions or 0) }}</span>
+                        </div>
+                        
+                        <div class="metric">
+                            <span class="metric-label">Expected Commissions:</span> 
+                            <span class="highlight-amount">${{ "%.2f"|format(data.expected_commissions or 0) }}</span>
+                        </div>
+                        
+                        <div class="metric">
+                            <span class="metric-label">Net Variance:</span> 
+                            <span class="{% if (data.variance_amount or 0) > 0 %}positive{% elif (data.variance_amount or 0) < 0 %}negative{% endif %}">
+                                ${{ "%.2f"|format(data.variance_amount or 0) }} ({{ "%.1f"|format(data.variance_percentage or 0) }}%)
+                            </span>
+                        </div>
                     </div>
                     
-                    <div class="metric">
-                        <span class="metric-label">Expected Commissions:</span> 
-                        ${{ "%.2f"|format(data.expected_commissions) }}
+                    {% if data.overpayments %}
+                    <div class="variance-section">
+                        <div class="variance-header">🔴 Overpayments ({{ data.overpayments|length }} subscribers)</div>
+                        <div class="alert-warning">
+                            Total Overpaid: <strong>${{ "%.2f"|format(data.overpayments|sum(attribute='amount')) }}</strong>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Policy ID</th>
+                                    <th>Subscriber Name</th>
+                                    <th>Overpayment Amount</th>
+                                    <th>Percentage Over</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for overpayment in data.overpayments %}
+                                <tr class="overpayment-row">
+                                    <td>{{ overpayment.policy_number }}</td>
+                                    <td>{{ overpayment.member_name }}</td>
+                                    <td class="positive">${{ "%.2f"|format(overpayment.amount) }}</td>
+                                    <td class="positive">{{ "%.1f"|format(overpayment.percentage) }}%</td>
+                                    <td>{{ overpayment.reason }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                    
-                    <div class="metric">
-                        <span class="metric-label">Variance:</span> 
-                        <span class="{% if data.variance_amount > 0 %}positive{% elif data.variance_amount < 0 %}negative{% endif %}">
-                            ${{ "%.2f"|format(data.variance_amount) }} ({{ "%.1f"|format(data.variance_percentage) }}%)
-                        </span>
-                    </div>
-                    
-                    {% if data.discrepancies %}
-                    <h4>Discrepancies Found:</h4>
-                    {% for disc in data.discrepancies %}
-                    <div class="discrepancy">
-                        <strong>{{ disc.type|title }}:</strong> 
-                        {% if disc.policy_number %}
-                            Policy {{ disc.policy_number }} - 
-                        {% endif %}
-                        {% if disc.variance_amount %}
-                            Expected: ${{ "%.2f"|format(disc.expected_amount) }}, 
-                            Actual: ${{ "%.2f"|format(disc.actual_amount) }}, 
-                            Variance: ${{ "%.2f"|format(disc.variance_amount) }}
-                        {% else %}
-                            ${{ "%.2f"|format(disc.amount) }} - {{ disc.reason }}
-                        {% endif %}
-                    </div>
-                    {% endfor %}
                     {% endif %}
                     
-                    {% if data.year_to_date and data.year_to_date.monthly_breakdown %}
-                    <h4>Year-to-Date Monthly Breakdown:</h4>
-                    <table>
-                        <tr><th>Month</th><th>Commission Amount</th></tr>
-                        {% for month, amount in data.year_to_date.monthly_breakdown.items() %}
-                        <tr><td>{{ month }}</td><td>${{ "%.2f"|format(amount) }}</td></tr>
-                        {% endfor %}
-                    </table>
+                    {% if data.underpayments %}
+                    <div class="variance-section">
+                        <div class="variance-header">🔵 Underpayments ({{ data.underpayments|length }} subscribers)</div>
+                        <div class="alert-danger">
+                            Total Underpaid: <strong>${{ "%.2f"|format(data.underpayments|sum(attribute='amount')) }}</strong>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Policy ID</th>
+                                    <th>Subscriber Name</th>
+                                    <th>Underpayment Amount</th>
+                                    <th>Percentage Under</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for underpayment in data.underpayments %}
+                                <tr class="underpayment-row">
+                                    <td>{{ underpayment.policy_number }}</td>
+                                    <td>{{ underpayment.member_name }}</td>
+                                    <td class="negative">${{ "%.2f"|format(underpayment.amount) }}</td>
+                                    <td class="negative">{{ "%.1f"|format(underpayment.percentage) }}%</td>
+                                    <td>{{ underpayment.reason }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+                    
+                    {% if not data.overpayments and not data.underpayments %}
+                    <div class="no-variances">
+                        <div class="alert-success">
+                            ✅ No significant variances found for this carrier. All commissions are within tolerance thresholds.
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if data.subscriber_variances %}
+                    <div class="variance-section">
+                        <div class="variance-header">📋 Detailed Subscriber Analysis</div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Policy ID</th>
+                                    <th>Subscriber Name</th>
+                                    <th>Expected Commission</th>
+                                    <th>Actual Commission</th>
+                                    <th>Variance Amount</th>
+                                    <th>Variance %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for variance in data.subscriber_variances %}
+                                <tr>
+                                    <td>{{ variance.policy_id }}</td>
+                                    <td>{{ variance.subscriber_name }}</td>
+                                    <td>${{ "%.2f"|format(variance.expected_commission) }}</td>
+                                    <td>${{ "%.2f"|format(variance.actual_commission) }}</td>
+                                    <td class="{% if variance.variance_amount > 0 %}positive{% elif variance.variance_amount < 0 %}negative{% endif %}">
+                                        ${{ "%.2f"|format(variance.variance_amount) }}
+                                    </td>
+                                    <td class="{% if variance.variance_amount > 0 %}positive{% elif variance.variance_amount < 0 %}negative{% endif %}">
+                                        {{ "%.1f"|format(variance.variance_percentage) }}%
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                     {% endif %}
                 </div>
             </div>
             {% endfor %}
             
-            <div style="margin-top: 50px; text-align: center; color: #666; font-size: 12px;">
-                <p>Generated by Automated Commission Reconciliation System</p>
+            <div style="margin-top: 50px; padding: 20px; text-align: center; color: #666; font-size: 12px; background-color: white; border-radius: 8px;">
+                <p>🤖 Generated by Automated Commission Reconciliation System</p>
+                <p>Report includes PHI-compliant analysis with pattern-based extraction for enhanced accuracy</p>
             </div>
         </body>
         </html>
         """
         
         try:
+            # Calculate totals across all carriers
+            total_overpayments = 0
+            total_underpayments = 0
+            total_discrepancies = 0
+            
+            # Process variance data for each carrier
+            processed_carriers = {}
+            for carrier, data in results.items():
+                if carrier == 'cross_carrier_analysis':
+                    continue
+                    
+                # Initialize processed data structure with existing data
+                processed_data = dict(data)
+                
+                # The overpayments and underpayments are already structured correctly
+                # Just need to calculate totals
+                if 'overpayments' in data and data['overpayments']:
+                    for overpayment in data['overpayments']:
+                        total_overpayments += overpayment.get('amount', 0)
+                
+                if 'underpayments' in data and data['underpayments']:
+                    for underpayment in data['underpayments']:
+                        total_underpayments += underpayment.get('amount', 0)
+                
+                # Ensure subscriber_variances exists (use the existing one or create from data)  
+                if 'subscriber_variances' not in processed_data:
+                    # If old field name exists, use it, otherwise create empty
+                    processed_data['subscriber_variances'] = processed_data.get('employer_variances', [])
+                
+                # Count discrepancies
+                total_discrepancies += len(processed_data.get('discrepancies', []))
+                total_discrepancies += len(processed_data.get('overpayments', []))
+                total_discrepancies += len(processed_data.get('underpayments', []))
+                
+                processed_carriers[carrier] = processed_data
+            
             # Prepare template data
             template_data = {
                 'report_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'carriers': {k: v for k, v in results.items() if k != 'cross_carrier_analysis'},
+                'carriers': processed_carriers,
                 'cross_carrier_analysis': results.get('cross_carrier_analysis', {}),
-                'carrier_count': len([k for k in results.keys() if k != 'cross_carrier_analysis']),
-                'total_discrepancies': sum(len(v.get('discrepancies', [])) for k, v in results.items() if k != 'cross_carrier_analysis')
+                'carrier_count': len(processed_carriers),
+                'total_discrepancies': total_discrepancies,
+                'total_overpayments': total_overpayments,
+                'total_underpayments': total_underpayments
             }
             
             template = Template(html_template)
@@ -296,7 +431,7 @@ class ReportGenerator:
             return ""
     
     def _generate_pdf_report(self, results: Dict[str, Any], output_dir: str, timestamp: str) -> str:
-        """Generate PDF executive summary report"""
+        """Generate PDF executive summary report with detailed variance analysis"""
         filename = f"commission_reconciliation_summary_{timestamp}.pdf"
         filepath = os.path.join(output_dir, filename)
         
@@ -323,10 +458,11 @@ class ReportGenerator:
             
             if 'cross_carrier_analysis' in results:
                 cross_data = results['cross_carrier_analysis']
+                total_discrepancies = sum(len(v.get('overpayments', [])) + len(v.get('underpayments', [])) for k, v in results.items() if k != 'cross_carrier_analysis')
                 summary_text = f"""
                 Total Commission Processed: ${cross_data.get('total_all_carriers', 0):,.2f}<br/>
                 Number of Carriers: {len([k for k in results.keys() if k != 'cross_carrier_analysis'])}<br/>
-                Total Discrepancies: {sum(len(v.get('discrepancies', [])) for k, v in results.items() if k != 'cross_carrier_analysis')}
+                Total Discrepancies: {total_discrepancies}
                 """
                 story.append(Paragraph(summary_text, styles['Normal']))
             
@@ -341,11 +477,12 @@ class ReportGenerator:
                 if carrier == 'cross_carrier_analysis':
                     continue
                 
+                discrepancies_count = len(data.get('overpayments', [])) + len(data.get('underpayments', []))
                 table_data.append([
                     carrier.replace('_', ' ').title(),
                     f"${data.get('total_commissions', 0):,.2f}",
                     f"${data.get('variance_amount', 0):,.2f}",
-                    str(len(data.get('discrepancies', [])))
+                    str(discrepancies_count)
                 ])
             
             table = Table(table_data)
@@ -363,25 +500,124 @@ class ReportGenerator:
             story.append(table)
             story.append(Spacer(1, 30))
             
-            # Individual carrier details
+            # Detailed Variance Analysis Section
+            story.append(Paragraph("Detailed Variance Analysis", styles['Heading2']))
+            story.append(Spacer(1, 10))
+            
+            # Process each carrier for detailed analysis
             for carrier, data in results.items():
                 if carrier == 'cross_carrier_analysis':
                     continue
                 
-                story.append(Paragraph(f"{carrier.replace('_', ' ').title()} Details", styles['Heading3']))
+                story.append(Paragraph(f"{carrier.replace('_', ' ').title()} Analysis", styles['Heading3']))
                 
-                details_text = f"""
-                Total Commissions: ${data.get('total_commissions', 0):,.2f}<br/>
-                Expected Commissions: ${data.get('expected_commissions', 0):,.2f}<br/>
-                Variance: ${data.get('variance_amount', 0):,.2f} ({data.get('variance_percentage', 0):.1f}%)<br/>
-                """
+                # Overpayments Table
+                if data.get('overpayments') and len(data['overpayments']) > 0:
+                    story.append(Paragraph("Overpayments", styles['Heading4']))
+                    
+                    overpay_data = [['Policy ID', 'Subscriber', 'Overpayment Amount', 'Percentage', 'Reason']]
+                    
+                    # Create a paragraph style for wrapping text in reason column
+                    reason_style = ParagraphStyle(
+                        'ReasonStyle',
+                        parent=styles['Normal'],
+                        fontSize=7,
+                        leading=8,
+                        leftIndent=2,
+                        rightIndent=2
+                    )
+                    
+                    for overpay in data['overpayments']:
+                        reason_paragraph = Paragraph(str(overpay.get('reason', 'N/A')), reason_style)
+                        overpay_data.append([
+                            str(overpay.get('policy_number', 'N/A')),
+                            str(overpay.get('member_name', 'N/A'))[:20],  # Slightly truncate for space
+                            f"${overpay.get('amount', 0):,.2f}",
+                            f"{overpay.get('percentage', 0):.1f}%",
+                            reason_paragraph  # Use paragraph for word wrapping
+                        ])
+                    
+                    overpay_table = Table(overpay_data, colWidths=[0.8*inch, 1.2*inch, 1*inch, 0.7*inch, 3.8*inch])
+                    overpay_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightyellow),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 7),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Top align for wrapped text
+                        ('ALIGN', (4, 1), (4, -1), 'LEFT')  # Left align reason column
+                    ]))
+                    
+                    story.append(overpay_table)
+                    story.append(Spacer(1, 10))
                 
-                story.append(Paragraph(details_text, styles['Normal']))
+                # Underpayments Table
+                if data.get('underpayments') and len(data['underpayments']) > 0:
+                    story.append(Paragraph("Underpayments", styles['Heading4']))
+                    
+                    underpay_data = [['Policy ID', 'Subscriber', 'Underpayment Amount', 'Percentage', 'Reason']]
+                    for underpay in data['underpayments']:
+                        reason_paragraph = Paragraph(str(underpay.get('reason', 'N/A')), reason_style)
+                        underpay_data.append([
+                            str(underpay.get('policy_number', 'N/A')),
+                            str(underpay.get('member_name', 'N/A'))[:20],  # Slightly truncate for space
+                            f"${underpay.get('amount', 0):,.2f}",
+                            f"{underpay.get('percentage', 0):.1f}%",
+                            reason_paragraph  # Use paragraph for word wrapping
+                        ])
+                    
+                    underpay_table = Table(underpay_data, colWidths=[0.8*inch, 1.2*inch, 1*inch, 0.7*inch, 3.8*inch])
+                    underpay_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightcoral),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 7),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),  # Top align for wrapped text
+                        ('ALIGN', (4, 1), (4, -1), 'LEFT')  # Left align reason column
+                    ]))
+                    
+                    story.append(underpay_table)
+                    story.append(Spacer(1, 10))
                 
+                # Subscriber Variance Summary (if not already shown in overpayments/underpayments)
+                if not data.get('overpayments') and not data.get('underpayments') and data.get('subscriber_variances') and len(data['subscriber_variances']) > 0:
+                    story.append(Paragraph("Subscriber Variance Analysis", styles['Heading4']))
+                    
+                    variance_data = [['Policy ID', 'Subscriber', 'Expected', 'Actual', 'Variance', 'Variance %']]
+                    for variance in data['subscriber_variances']:
+                        variance_data.append([
+                            str(variance.get('policy_id', 'N/A')),
+                            str(variance.get('subscriber_name', 'N/A'))[:25],  # Truncate for space
+                            f"${variance.get('expected_commission', 0):,.2f}",
+                            f"${variance.get('actual_commission', 0):,.2f}",
+                            f"${variance.get('variance_amount', 0):,.2f}",
+                            f"{variance.get('variance_percentage', 0):.1f}%"
+                        ])
+                    
+                    variance_table = Table(variance_data, colWidths=[1*inch, 1.5*inch, 1*inch, 1*inch, 1*inch, 0.8*inch])
+                    variance_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 7),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+                    ]))
+                    
+                    story.append(variance_table)
+                    story.append(Spacer(1, 15))
+                
+                # Legacy discrepancies section (if any exist)
                 if data.get('discrepancies'):
-                    story.append(Paragraph("Discrepancies:", styles['Heading4']))
+                    story.append(Paragraph("Other Discrepancies:", styles['Heading4']))
                     for disc in data.get('discrepancies', []):
-                        # Use the correct field names from the discrepancy data structure
                         disc_type = disc.get('type', '').title()
                         actual_amount = disc.get('actual_amount', 0)
                         expected_amount = disc.get('expected_amount', 0)

@@ -24,7 +24,10 @@ class CommissionProcessor:
             'aetna': self._parse_aetna_pdf,
             'blue_cross': self._parse_blue_cross_pdf,
             'cigna': self._parse_cigna_pdf,
-            'unitedhealth': self._parse_unitedhealth_pdf
+            'unitedhealth': self._parse_unitedhealth_pdf,
+            'hne': self._parse_hne_pdf,
+            'humana': self._parse_humana_pdf,
+            'hc': self._parse_hc_pdf
         }
         self.enrollment_info = None
         self.llm_service = LLMExtractionService()
@@ -84,11 +87,19 @@ class CommissionProcessor:
                 self.logger.warning(f"Unsupported file format: {filename}")
                 continue
             
+            # Skip enrollment and system files (same logic as file monitor)
+            filename_lower = filename.lower()
+            excluded_patterns = ['enrollment', 'llm_integration', 'readme', 'config']
+            if any(pattern in filename_lower for pattern in excluded_patterns):
+                self.logger.debug(f"Skipping excluded file: {filename}")
+                continue
+            
             # Determine carrier from filename
             carrier = self._identify_carrier(filename)
             if not carrier:
-                self.logger.warning(f"Could not identify carrier for file: {filename}")
-                continue
+                # For unknown carriers, use filename as identifier and try AI extraction
+                carrier = filename.split('_')[0].lower() if '_' in filename else os.path.splitext(filename)[0].lower()
+                self.logger.info(f"Unknown carrier detected: {carrier}. Will use AI extraction for processing.")
             
             try:
                 self.logger.info(f"Processing {carrier} commission statement: {filename}")
@@ -125,6 +136,12 @@ class CommissionProcessor:
             return 'cigna'
         elif 'unitedhealth' in filename_lower or 'united_health' in filename_lower or 'uhc' in filename_lower:
             return 'unitedhealth'
+        elif 'hne' in filename_lower:
+            return 'hne'
+        elif 'humana' in filename_lower:
+            return 'humana'
+        elif 'hc_commission' in filename_lower or filename_lower.startswith('hc_') or '_hc_' in filename_lower:
+            return 'hc'
         
         return None
     
@@ -162,9 +179,15 @@ class CommissionProcessor:
                 
                 data['commissions'] = self.llm_service.extract_commission_entries(full_text, carrier)
                 
+                # Debug: log extracted entries
+                self.logger.info(f"Extracted {len(data['commissions'])} commission entries for {carrier}")
+                for i, entry in enumerate(data['commissions']):
+                    self.logger.info(f"Entry {i+1}: Policy={entry.get('policy_number')}, Amount={entry.get('commission_amount')}, Member={entry.get('member_name')}")
+                
                 # Calculate summary statistics from extracted commissions
                 if data['commissions']:
-                    total_commission = sum(entry.get('amount', 0) for entry in data['commissions'])
+                    # Check for both 'amount' and 'commission_amount' fields
+                    total_commission = sum(entry.get('commission_amount') or entry.get('amount', 0) for entry in data['commissions'])
                     data['summary'] = {
                         'total_commission': total_commission,
                         'count': len(data['commissions']),
@@ -213,6 +236,141 @@ class CommissionProcessor:
         
         # Add UnitedHealth-specific parsing logic here
         
+        return data
+
+    def _parse_hne_pdf(self, file_path: str) -> Dict[str, Any]:
+        """Parse HNE-specific PDF format using carrier-specific LLM extraction"""
+        data = {
+            'carrier': 'hne',
+            'file_path': file_path,
+            'commissions': [],
+            'summary': {},
+            'raw_text': ''
+        }
+        
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                full_text = ""
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        full_text += page_text + "\n"
+                
+                data['raw_text'] = full_text
+                
+                # Use LLM service with HNE-specific extraction logic
+                self.logger.info(f"Processing HNE commission statement with enhanced extraction")
+                data['commissions'] = self.llm_service.extract_commission_entries(full_text, 'hne')
+                
+                # Debug: log extracted entries
+                self.logger.info(f"Extracted {len(data['commissions'])} HNE commission entries")
+                for i, entry in enumerate(data['commissions']):
+                    self.logger.info(f"HNE Entry {i+1}: Policy={entry.get('policy_number')}, Amount={entry.get('commission_amount')}, Member={entry.get('member_name')}")
+                
+                # Calculate summary statistics
+                if data['commissions']:
+                    total_commission = sum(entry.get('commission_amount', 0) for entry in data['commissions'])
+                    data['summary'] = {
+                        'total_commission': total_commission,
+                        'count': len(data['commissions']),
+                        'average_commission': total_commission / len(data['commissions']) if data['commissions'] else 0
+                    }
+                else:
+                    data['summary'] = {'total_commission': 0, 'count': 0, 'average_commission': 0}
+                
+        except Exception as e:
+            self.logger.error(f"Error processing HNE PDF {file_path}: {str(e)}")
+            
+        return data
+
+    def _parse_humana_pdf(self, file_path: str) -> Dict[str, Any]:
+        """Parse Humana-specific PDF format using carrier-specific LLM extraction"""
+        data = {
+            'carrier': 'humana',
+            'file_path': file_path,
+            'commissions': [],
+            'summary': {},
+            'raw_text': ''
+        }
+        
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                full_text = ""
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        full_text += page_text + "\n"
+                
+                data['raw_text'] = full_text
+                
+                # Use LLM service with Humana-specific extraction logic
+                self.logger.info(f"Processing Humana commission statement with enhanced extraction")
+                data['commissions'] = self.llm_service.extract_commission_entries(full_text, 'humana')
+                
+                # Debug: log extracted entries
+                self.logger.info(f"Extracted {len(data['commissions'])} Humana commission entries")
+                for i, entry in enumerate(data['commissions']):
+                    self.logger.info(f"Humana Entry {i+1}: Policy={entry.get('policy_number')}, Amount={entry.get('commission_amount')}, Member={entry.get('member_name')}")
+                
+                # Calculate summary statistics
+                if data['commissions']:
+                    total_commission = sum(entry.get('commission_amount', 0) for entry in data['commissions'])
+                    data['summary'] = {
+                        'total_commission': total_commission,
+                        'count': len(data['commissions']),
+                        'average_commission': total_commission / len(data['commissions']) if data['commissions'] else 0
+                    }
+                else:
+                    data['summary'] = {'total_commission': 0, 'count': 0, 'average_commission': 0}
+                
+        except Exception as e:
+            self.logger.error(f"Error processing Humana PDF {file_path}: {str(e)}")
+            
+        return data
+
+    def _parse_hc_pdf(self, file_path: str) -> Dict[str, Any]:
+        """Parse HC-specific PDF format using carrier-specific LLM extraction"""
+        data = {
+            'carrier': 'hc',
+            'file_path': file_path,
+            'commissions': [],
+            'summary': {},
+            'raw_text': ''
+        }
+        
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                full_text = ""
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        full_text += page_text + "\n"
+                
+                data['raw_text'] = full_text
+                
+                # Use LLM service with HC-specific extraction logic
+                self.logger.info(f"Processing HC commission statement with enhanced extraction")
+                data['commissions'] = self.llm_service.extract_commission_entries(full_text, 'hc')
+                
+                # Debug: log extracted entries
+                self.logger.info(f"Extracted {len(data['commissions'])} HC commission entries")
+                for i, entry in enumerate(data['commissions']):
+                    self.logger.info(f"HC Entry {i+1}: Policy={entry.get('policy_number')}, Amount={entry.get('commission_amount')}, Member={entry.get('member_name')}")
+                
+                # Calculate summary statistics
+                if data['commissions']:
+                    total_commission = sum(entry.get('commission_amount', 0) for entry in data['commissions'])
+                    data['summary'] = {
+                        'total_commission': total_commission,
+                        'count': len(data['commissions']),
+                        'average_commission': total_commission / len(data['commissions']) if data['commissions'] else 0
+                    }
+                else:
+                    data['summary'] = {'total_commission': 0, 'count': 0, 'average_commission': 0}
+                
+        except Exception as e:
+            self.logger.error(f"Error processing HC PDF {file_path}: {str(e)}")
+            
         return data
     
     def _extract_basic_info(self, text: str) -> Dict[str, Any]:
@@ -354,7 +512,7 @@ class CommissionProcessor:
                 })
             else:
                 self.logger.warning(f"No enrollment info found for policy: {policy_num}")
-                commission['expected_commission'] = commission.get('amount', 0)  # Default to actual
+                commission['expected_commission'] = 0  # Orphaned commissions have zero expected commission
             
             enriched_commissions.append(commission)
         

@@ -23,12 +23,13 @@ class CommissionFileHandler(FileSystemEventHandler):
         self.logger = logger
         self.processed_files = set()  # Track recently processed files
         self.file_timers = {}  # Track file modification timers
+        self.file_processing_times = {}  # Track when we processed each file
         
         # Commission statement file patterns
         self.commission_patterns = [
-            'commission', 'statement', 'payment', 'earnings',
+            'commission', 'commision', 'statement', 'stmt', 'payment', 'earnings',
             'producer', 'agent', 'aetna', 'blue_cross', 'cigna', 
-            'unitedhealth', 'anthem', 'humana', 'kaiser'
+            'unitedhealth', 'anthem', 'humana', 'kaiser', 'hne'
         ]
         
         self.valid_extensions = ['.pdf', '.xlsx', '.xls', '.csv']
@@ -55,8 +56,20 @@ class CommissionFileHandler(FileSystemEventHandler):
             if not self._is_commission_statement(file_path):
                 return
             
-            # Avoid duplicate processing of the same file
-            if file_path in self.processed_files:
+            # Get file modification time to avoid processing same file multiple times
+            try:
+                current_mtime = os.path.getmtime(file_path)
+            except OSError:
+                return  # File might be deleted or inaccessible
+            
+            # Check if we've recently processed this file (within last 5 minutes)
+            current_time = datetime.now().timestamp()
+            recent_threshold = current_time - 300  # 5 minutes ago
+            
+            if (file_path in self.processed_files and 
+                file_path in self.file_processing_times and
+                self.file_processing_times[file_path] >= recent_threshold):
+                self.logger.debug(f"Skipping recently processed file: {os.path.basename(file_path)} (last processed: {datetime.fromtimestamp(self.file_processing_times[file_path]).strftime('%H:%M:%S')})")
                 return
             
             # Cancel existing timer for this file if it exists
@@ -79,8 +92,14 @@ class CommissionFileHandler(FileSystemEventHandler):
             if not any(file_path_lower.endswith(ext) for ext in self.valid_extensions):
                 return False
             
-            # Check filename for commission-related keywords
             filename = os.path.basename(file_path_lower)
+            
+            # Exclude enrollment and system files
+            excluded_patterns = ['enrollment', 'llm_integration', 'readme', 'config']
+            if any(pattern in filename for pattern in excluded_patterns):
+                return False
+            
+            # Check filename for commission-related keywords
             has_commission_keyword = any(pattern in filename for pattern in self.commission_patterns)
             
             # Check file size (avoid empty or tiny files)
@@ -101,6 +120,10 @@ class CommissionFileHandler(FileSystemEventHandler):
             # Double-check file still exists and is complete
             if not os.path.exists(file_path):
                 return
+            
+            # Record when we processed this file
+            current_time = datetime.now().timestamp()
+            self.file_processing_times[file_path] = current_time
             
             # Add to processed files set
             self.processed_files.add(file_path)
@@ -126,11 +149,18 @@ class CommissionFileHandler(FileSystemEventHandler):
     def cleanup_processed_files(self, max_age_hours=24):
         """Clean up old entries from processed files set"""
         # Remove files from processed set after specified hours
-        # This allows reprocessing of files that might be updated later
-        cutoff_time = datetime.now() - timedelta(hours=max_age_hours)
-        # For now, we'll just clear the set periodically
-        if len(self.processed_files) > 1000:  # Prevent memory buildup
+        cutoff_time = datetime.now().timestamp() - (max_age_hours * 3600)
+        
+        # Clean up old processing times
+        old_files = [f for f, ptime in self.file_processing_times.items() if ptime < cutoff_time]
+        for file_path in old_files:
+            self.file_processing_times.pop(file_path, None)
+            self.processed_files.discard(file_path)
+        
+        # Prevent memory buildup - clean if too many entries
+        if len(self.processed_files) > 1000:
             self.processed_files.clear()
+            self.file_processing_times.clear()
 
 
 class AutoCommissionMonitor:
@@ -209,53 +239,84 @@ class AutoCommissionMonitor:
             self.logger.error(f"[ERROR] Error stopping monitor: {e}")
     
     def _processing_loop(self):
-        """Main processing loop that handles queued files"""
+        """Main processing loop that handles queued files with batch processing"""
         self.logger.info("[LOOP] Processing loop started")
+        batch_files = []
+        last_activity = None
+        batch_timeout = 10  # seconds to wait for more files before processing batch
         
         while self.is_running:
             try:
-                # Wait for files to process
-                file_event = self.processing_queue.get(timeout=1)
-                
-                # Check for sentinel value (stop signal)
-                if file_event is None:
-                    break
-                
-                # Process the commission statement
-                self._process_commission_file(file_event)
-                
-            except queue.Empty:
-                continue
+                # Wait for files to process with timeout
+                try:
+                    file_event = self.processing_queue.get(timeout=2)
+                    
+                    # Check for sentinel value (stop signal)
+                    if file_event is None:
+                        # Process any remaining files in batch before stopping
+                        if batch_files:
+                            self._process_commission_batch(batch_files)
+                        break
+                    
+                    # Add file to batch
+                    batch_files.append(file_event)
+                    last_activity = time.time()
+                    
+                    filename = os.path.basename(file_event['file_path'])
+                    self.logger.info(f"[BATCH] Added to processing batch: {filename} (batch size: {len(batch_files)})")
+                    
+                except queue.Empty:
+                    # No new files - check if we should process current batch
+                    if batch_files and last_activity:
+                        time_since_last = time.time() - last_activity
+                        if time_since_last >= batch_timeout:
+                            self.logger.info(f"[BATCH] Timeout reached, processing batch of {len(batch_files)} files")
+                            self._process_commission_batch(batch_files)
+                            batch_files = []
+                            last_activity = None
+                    continue
+                    
             except Exception as e:
                 self.logger.error(f"[ERROR] Error in processing loop: {e}")
                 continue
         
         self.logger.info("[LOOP] Processing loop stopped")
     
-    def _process_commission_file(self, file_event):
-        """Process a single commission statement file"""
-        file_path = file_event['file_path']
-        event_type = file_event['event_type']
-        timestamp = file_event['timestamp']
-        
+    def _process_commission_batch(self, batch_files):
+        """Process a batch of commission statement files together"""
         try:
-            filename = os.path.basename(file_path)
-            self.logger.info(f"[PROCESS] Processing commission statement: {filename}")
-            self.logger.info(f"[EVENT] File event: {event_type} at {timestamp.strftime('%H:%M:%S')}")
+            if not batch_files:
+                return
             
-            # Import and run the main reconciliation process
+            filenames = [os.path.basename(f['file_path']) for f in batch_files]
+            self.logger.info(f"[BATCH] Processing batch of {len(batch_files)} commission statements:")
+            for filename in filenames:
+                self.logger.info(f"[BATCH]   • {filename}")
+            
+            # Log the batch event details
+            for file_event in batch_files:
+                event_type = file_event['event_type']
+                timestamp = file_event['timestamp']
+                filename = os.path.basename(file_event['file_path'])
+                self.logger.info(f"[EVENT] File: {filename}, Event: {event_type} at {timestamp.strftime('%H:%M:%S')}")
+            
+            # Import and run the main reconciliation process once for all files
             from main import run_reconciliation_workflow
             
             success = run_reconciliation_workflow()
             
             if success:
-                self.logger.info(f"[SUCCESS] Successfully processed commission statement: {filename}")
-                self.logger.info("[EMAIL] Reports generated and emailed to stakeholders")
+                self.logger.info(f"[SUCCESS] Successfully processed batch of {len(batch_files)} commission statements")
+                self.logger.info("[EMAIL] Single consolidated report generated and emailed to stakeholders")
             else:
-                self.logger.error(f"[FAILED] Failed to process commission statement: {filename}")
+                self.logger.error(f"[FAILED] Failed to process commission statement batch")
             
         except Exception as e:
-            self.logger.error(f"[ERROR] Error processing commission file {file_path}: {e}")
+            self.logger.error(f"[ERROR] Error processing commission batch: {e}")
+    
+    def _process_commission_file(self, file_event):
+        """Process a single commission statement file (legacy method for compatibility)"""
+        self._process_commission_batch([file_event])
     
     def get_status(self):
         """Get current monitoring status"""
@@ -267,18 +328,68 @@ class AutoCommissionMonitor:
         }
     
     def manual_scan(self):
-        """Manually scan the docs directory for any existing files"""
+        """Manually scan the docs directory for any existing files and batch process them"""
         self.logger.info("[SCAN] Performing manual scan of docs directory...")
         
         try:
+            scan_files = []
             for file_path in Path(self.watch_directory).rglob('*'):
-                if file_path.is_file():
-                    self.file_handler._handle_file_event(str(file_path), "MANUAL_SCAN")
+                if file_path.is_file() and self.file_handler._is_commission_statement(str(file_path)):
+                    scan_files.append({
+                        'file_path': str(file_path),
+                        'event_type': "MANUAL_SCAN",
+                        'timestamp': datetime.now(),
+                        'file_size': os.path.getsize(str(file_path))
+                    })
+            
+            # If we found commission files, process them as a single batch
+            if scan_files:
+                self.logger.info(f"[SCAN] Found {len(scan_files)} commission statements for batch processing")
+                self._process_commission_batch(scan_files)
+                
+                # Mark files as processed to avoid duplicate processing
+                current_time = datetime.now().timestamp()
+                for file_event in scan_files:
+                    file_path = file_event['file_path']
+                    self.file_handler.processed_files.add(file_path)
+                    self.file_handler.file_processing_times[file_path] = current_time
             
             self.logger.info("[SCAN] Manual scan completed")
             
         except Exception as e:
             self.logger.error(f"[ERROR] Error during manual scan: {e}")
+    
+    def _process_commission_batch(self, batch_files):
+        """Process a batch of commission statement files at the monitor level"""
+        try:
+            if not batch_files:
+                return
+            
+            filenames = [os.path.basename(f['file_path']) for f in batch_files]
+            self.logger.info(f"[BATCH] Processing batch of {len(batch_files)} commission statements:")
+            for filename in filenames:
+                self.logger.info(f"[BATCH]   • {filename}")
+            
+            # Log the batch event details
+            for file_event in batch_files:
+                event_type = file_event['event_type']
+                timestamp = file_event['timestamp']
+                filename = os.path.basename(file_event['file_path'])
+                self.logger.info(f"[EVENT] File: {filename}, Event: {event_type} at {timestamp.strftime('%H:%M:%S')}")
+            
+            # Import and run the main reconciliation process once for all files
+            from main import run_reconciliation_workflow
+            
+            success = run_reconciliation_workflow()
+            
+            if success:
+                self.logger.info(f"[SUCCESS] Successfully processed batch of {len(batch_files)} commission statements")
+                self.logger.info("[EMAIL] Single consolidated report generated and emailed to stakeholders")
+            else:
+                self.logger.error(f"[FAILED] Failed to process commission statement batch")
+            
+        except Exception as e:
+            self.logger.error(f"[ERROR] Error processing commission batch: {e}")
 
 
 def setup_monitoring_logging():
