@@ -11,6 +11,7 @@ python-dateutil==2.9.0.post0
 
 # AI/LLM Integration
 openai==2.1.0
+landingai-ade==0.17.1
 
 # Report Generation
 reportlab==4.4.4

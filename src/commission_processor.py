@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Any
 import logging
 
 from .llm_extraction_service import LLMExtractionService
+from .landingai_extraction_service import LandingAIExtractionService
 
 class CommissionProcessor:
     """Main class for processing commission statements from multiple carriers"""
@@ -31,6 +32,13 @@ class CommissionProcessor:
         }
         self.enrollment_info = None
         self.llm_service = LLMExtractionService()
+        self.landingai_service = LandingAIExtractionService()
+        
+        # Check if LandingAI should be used
+        self.use_landingai = (
+            os.environ.get('USE_LANDING_AI', 'false').lower() == 'true' and
+            self.landingai_service.is_available()
+        )
     
     def load_enrollment_info(self, docs_directory: str) -> None:
         """
@@ -146,7 +154,27 @@ class CommissionProcessor:
         return None
     
     def _process_pdf(self, file_path: str, carrier: str) -> Optional[Dict[str, Any]]:
-        """Process PDF commission statement"""
+        """Process PDF commission statement with LandingAI or fallback methods"""
+        
+        # Try LandingAI extraction first if enabled
+        if self.use_landingai:
+            try:
+                self.logger.info(f"Attempting LandingAI extraction for {carrier} PDF: {file_path}")
+                landingai_result = self.landingai_service.extract_commission_data(file_path, carrier)
+                
+                if landingai_result and 'error' not in landingai_result:
+                    self.logger.info(f"LandingAI extraction successful for {carrier}")
+                    
+                    # Convert to expected format
+                    result = self._convert_landingai_result(landingai_result, file_path)
+                    return result
+                else:
+                    self.logger.warning(f"LandingAI extraction failed, falling back to traditional methods")
+                    
+            except Exception as e:
+                self.logger.error(f"LandingAI extraction error: {str(e)}, falling back to traditional methods")
+        
+        # Fallback to traditional extraction methods
         parser = self.carrier_parsers.get(carrier)
         if not parser:
             result = self._generic_pdf_parse(file_path, carrier)
@@ -160,6 +188,37 @@ class CommissionProcessor:
             if statement_date:
                 result['statement_date'] = statement_date
         
+        return result
+    
+    def _convert_landingai_result(self, landingai_result: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+        """Convert LandingAI extraction result to standard format"""
+        entries = landingai_result.get('commission_entries', [])
+        
+        # Convert entries to expected format
+        converted_entries = []
+        for entry in entries:
+            converted_entry = {
+                'policy_id': entry.get('policy_id', ''),
+                'member_name': entry.get('member_name', 'Unknown'),
+                'commission_amount': entry.get('commission_amount', 0.0),
+                'service_period': entry.get('service_period', ''),
+                'carrier': entry.get('carrier', landingai_result.get('carrier', 'unknown'))
+            }
+            converted_entries.append(converted_entry)
+        
+        # Build result in expected format
+        result = {
+            'carrier': landingai_result.get('carrier', 'unknown'),
+            'statement_date': landingai_result.get('statement_date'),
+            'agent_info': landingai_result.get('agent_info', {}),
+            'total_amount': landingai_result.get('total_amount', 0.0),
+            'commission_entries': converted_entries,
+            'source_file': os.path.basename(file_path),
+            'extraction_method': 'landingai_ade',
+            'metadata': landingai_result.get('metadata', {})
+        }
+        
+        self.logger.info(f"LandingAI extracted {len(converted_entries)} entries, total: ${result['total_amount']}")
         return result
     
     def _extract_statement_date_from_file(self, file_path: str, commission_data: Dict[str, Any]) -> Optional[str]:
